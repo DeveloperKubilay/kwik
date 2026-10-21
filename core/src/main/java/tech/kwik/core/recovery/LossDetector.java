@@ -173,8 +173,7 @@ public class LossDetector {
             return;
         }
 
-        int lossDelay = (int) (kTimeThreshold * Integer.max(rttEstimater.getSmoothedRtt(), rttEstimater.getLatestRtt()));
-        assert(lossDelay > 0);  // Minimum time of kGranularity before packets are deemed lost
+        int lossDelay = Math.max(1, (int) (kTimeThreshold * Integer.max(rttEstimater.getSmoothedRtt(), rttEstimater.getLatestRtt())));
         Instant lostSendTime = Instant.now(clock).minusMillis(lossDelay);
 
         // https://www.rfc-editor.org/rfc/rfc9002.html#section-6.1

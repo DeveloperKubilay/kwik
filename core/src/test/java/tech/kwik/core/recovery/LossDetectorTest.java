@@ -73,6 +73,20 @@ class LossDetectorTest extends RecoveryTests {
 
     //region congestion controller
     @Test
+    void zeroMillisecondRttStillUsesMinimumLossDelay() {
+        when(rttEstimator.getSmoothedRtt()).thenReturn(0);
+        when(rttEstimator.getLatestRtt()).thenReturn(0);
+        lossDetector.packetSent(createPacket(1), clock.instant(), lostPacketHandler::process);
+        lossDetector.packetSent(createPacket(2), clock.instant(), lostPacketHandler::process);
+        lossDetector.onAckReceived(new AckFrame(2), clock.instant());
+        verify(lostPacketHandler, never()).process(any(QuicPacket.class));
+        assertThat(lossDetector.getLossTime()).isEqualTo(clock.instant().plusMillis(1));
+        clock.fastForward(2);
+        lossDetector.detectLostPackets();
+        verify(lostPacketHandler).process(argThat(new PacketMatcherByPacketNumber(1)));
+    }
+
+    @Test
     void congestionControllerIsOnlyCalledOncePerAck() {
         List<QuicPacket> packets = createPackets(1, 2, 3);
         lossDetector.packetSent(packets.get(0), Instant.now(), lostPacket -> lostPacketHandler.process(lostPacket));
