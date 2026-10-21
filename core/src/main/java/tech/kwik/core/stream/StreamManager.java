@@ -558,6 +558,10 @@ public class StreamManager {
         return config.maxBidirectionalStreamBufferSize();
     }
 
+    public long getMaxConnectionBufferSize() {
+        return config.maxConnectionBufferSize();
+    }
+
     public void setDefaultUnidirectionalStreamReceiveBufferSize(long newSize) {
         config = ConnectionConfigImpl.cloneWithMaxUnidirectionalStreamReceiveBufferSize(config, newSize);
     }
