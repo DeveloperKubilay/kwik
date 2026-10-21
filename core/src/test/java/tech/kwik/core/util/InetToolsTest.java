@@ -19,14 +19,34 @@
 package tech.kwik.core.util;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
+import org.mockito.MockedStatic;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.mockito.Mockito.*;
 
 class InetToolsTest {
+
+    private MockedStatic<InetAddress> dns;
+
+    @BeforeEach
+    void prepareDns() throws Exception {
+        InetAddress ipv4 = InetAddress.getByAddress(new byte[]{(byte) 192, 0, 2, 1});
+        InetAddress ipv6 = InetAddress.getByAddress(new byte[]{0x20, 0x01, 0x0d, (byte) 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+        dns = mockStatic(InetAddress.class, CALLS_REAL_METHODS);
+        dns.when(() -> InetAddress.getAllByName("www.google.com")).thenReturn(new InetAddress[]{ipv4, ipv6});
+        dns.when(() -> InetAddress.getAllByName("ipv4only.arpa")).thenReturn(new InetAddress[]{ipv4});
+    }
+
+    @AfterEach
+    void closeDns() {
+        dns.close();
+    }
 
     @Test
     void whenPreferenceIsIP4AndIP4IsAvailableThenIP4IsReturned() throws Exception {
