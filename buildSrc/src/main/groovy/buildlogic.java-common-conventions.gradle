@@ -79,7 +79,7 @@ mavenPublishing {
     pom {
         name = 'Kwik'
         description = 'A QUIC implementation in Java'
-        url = 'https://github.com/ptrd/kwik'
+        url = 'https://github.com/DeveloperKubilay/kwik'
 
         licenses {
             license {
@@ -97,9 +97,9 @@ mavenPublishing {
         }
 
         scm {
-            connection = 'scm:git:git@github.com:ptrd/kwik.git'
-            developerConnection = 'scm:git:git@github.com:ptrd/kwik.git'
-            url = 'https://github.com/ptrd/kwik'
+            connection = 'scm:git:https://github.com/DeveloperKubilay/kwik.git'
+            developerConnection = 'scm:git:git@github.com:DeveloperKubilay/kwik.git'
+            url = 'https://github.com/DeveloperKubilay/kwik'
         }
     }
 }
