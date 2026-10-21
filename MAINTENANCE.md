@@ -1,6 +1,6 @@
 # Kwik bakım sürümü
 
-Temel: [ptrd/kwik v0.12.1](https://github.com/ptrd/kwik/tree/v0.12.1), kaynak `d4098009a281f70df43db4736e1976521028ac0a`. Özel sürüm `0.12.1-maintenance.1`; resmî bir Kwik 0.12.2 yayını değildir.
+Temel: [ptrd/kwik v0.12.1](https://github.com/ptrd/kwik/tree/v0.12.1), kaynak `1be72817017d45dd3f7686b253a9a8343e9681de`. Özel sürüm `0.12.1-maintenance.1`; resmî bir Kwik 0.12.2 yayını değildir.
 
 ## Korunan katkılar
 

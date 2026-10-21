@@ -38,11 +38,11 @@ for source, name in files.items():
     shutil.copy2(source, destination / name)
 archive_name = f'kwik-{version}-full-source.zip'
 subprocess.run(['git', 'archive', '--format=zip', f'--prefix=kwik-{version}/', f'--output={destination / archive_name}', revision], cwd=root, check=True)
-metadata = {'version': version, 'commit': revision, 'upstream': 'ptrd/kwik', 'upstreamCommit': 'd4098009a281f70df43db4736e1976521028ac0a', 'repository': 'https://github.com/DeveloperKubilay/kwik'}
+metadata = {'version': version, 'commit': revision, 'upstream': 'ptrd/kwik', 'upstreamCommit': '1be72817017d45dd3f7686b253a9a8343e9681de', 'repository': 'https://github.com/DeveloperKubilay/kwik'}
 (destination / 'build-info.json').write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
 notes = f'''Maintenance build of Kwik {version}.
 
-Source commit: `{revision}`. Upstream base: `d4098009a281f70df43db4736e1976521028ac0a`.
+Source commit: `{revision}`. Upstream base: `1be72817017d45dd3f7686b253a9a8343e9681de`.
 
 Adds opt-in bounded receive-window auto-tuning, retransmission of lost connection credit and packet registration before immediate ACKs. Upstream 0.12.1 already contains the stream send-wakeup and minimum loss-delay fixes, and uses agent15 4.0. Does not add BBR, packet pacing, an application jitter buffer or path MTU discovery. Applications opt in through enableReceiveWindowAutoTuning.
 
