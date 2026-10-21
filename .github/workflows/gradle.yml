@@ -2,7 +2,7 @@ name: Kwik tests and release
 
 on:
   push:
-    branches: ['codex/adaptive-receive-window']
+    branches: ['adaptive-receive-window']
     tags: ['v0.11.0-safra.*']
   pull_request:
   workflow_dispatch:
@@ -74,4 +74,4 @@ jobs:
         run: |
           cd dist
           sha256sum --check SHA256SUMS
-          gh release create "$RELEASE_TAG" ./* --verify-tag --title "Kwik $RELEASE_TAG for Safra" --notes-file RELEASE-NOTES.md --prerelease
+          gh release create "$RELEASE_TAG" ./* --verify-tag --title "Kwik $RELEASE_TAG" --notes-file RELEASE-NOTES.md --prerelease

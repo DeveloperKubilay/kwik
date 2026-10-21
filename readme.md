@@ -1,4 +1,4 @@
-Safra bakım fork'u: değişiklikler, testler ve sürüm dosyaları için [SAFRA.md](SAFRA.md). Upstream proje: [ptrd/kwik](https://github.com/ptrd/kwik).
+Kwik bakım fork'u: değişiklikler, testler ve sürüm dosyaları için [MAINTENANCE.md](MAINTENANCE.md). Upstream proje: [ptrd/kwik](https://github.com/ptrd/kwik).
 
 ![Kwik](https://bitbucket.org/pjtr/kwik/raw/master/docs/media/Logo_Kwik_rectangle.png)
 

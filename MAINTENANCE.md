@@ -1,4 +1,4 @@
-# Safra Kwik fork'u
+# Kwik bakım fork'u
 
 Bu depo, Peter Doornbosch'un [Kwik](https://github.com/ptrd/kwik) kütüphanesinin Safra için bakım fork'udur. Temel `v0.11`, kaynak commit'i `4d5d40f540d70a1b50ea59651f9d36740e77f165`, özel sürüm `0.11.0-safra.2`.
 
@@ -11,7 +11,7 @@ Değişiklikler:
 - 1 ms altı RTT'nin 0 ms'ye yuvarlandığı durumda kayıp hesabında en az 1 ms sınırı.
 - Ağdan bağımsız hale getirilen iki eski test ve saat sınırındaki kararsız testin düzeltilmesi; yeni regresyon testleri.
 
-BBR, ayrı paket pacing katmanı, uygulama jitter tamponu ve dinamik PMTU keşfi bu fork'ta eklenmedi. TURN ChannelData değişiklikleri bu kütüphanede değil, [Safra](https://github.com/DeveloperKubilay/Safra/tree/codex/adaptive-receive-window) tarafındadır.
+BBR, ayrı paket pacing katmanı, uygulama jitter tamponu ve dinamik PMTU keşfi bu fork'ta eklenmedi. TURN ChannelData değişiklikleri bu kütüphanede değil, [Safra](https://github.com/DeveloperKubilay/Safra/tree/adaptive-receive-window) tarafındadır.
 
 ## Derleme
 

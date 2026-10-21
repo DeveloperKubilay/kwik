@@ -33,18 +33,18 @@ if xml.parse(pom).getroot().findtext('m:version', namespaces=namespace) != versi
 destination = root / 'dist'
 destination.mkdir(exist_ok=True)
 files = {jar: jar.name, sources: sources.name, pom: f'kwik-{version}.pom'}
-files.update({root / name: name for name in ('LICENSE.txt', 'LICENSE-LESSER.txt', 'SAFRA.md')})
+files.update({root / name: name for name in ('LICENSE.txt', 'LICENSE-LESSER.txt', 'MAINTENANCE.md')})
 for source, name in files.items():
     shutil.copy2(source, destination / name)
 archive_name = f'kwik-{version}-full-source.zip'
 subprocess.run(['git', 'archive', '--format=zip', f'--prefix=kwik-{version}/', f'--output={destination / archive_name}', revision], cwd=root, check=True)
 metadata = {'version': version, 'commit': revision, 'upstream': 'ptrd/kwik', 'upstreamCommit': '4d5d40f540d70a1b50ea59651f9d36740e77f165', 'repository': 'https://github.com/DeveloperKubilay/kwik'}
 (destination / 'build-info.json').write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
-notes = f'''Safra maintenance build of Kwik {version}.
+notes = f'''Maintenance build of Kwik {version}.
 
 Source commit: `{revision}`. Upstream base: `4d5d40f540d70a1b50ea59651f9d36740e77f165`.
 
-Adds bounded receive-window auto-tuning, connection-credit retransmission, a stream send-wakeup race fix, packet registration before immediate ACKs and a minimum loss delay for submillisecond RTT. Does not add BBR, packet pacing, an application jitter buffer or path MTU discovery. Requires Safra integration to enable auto-tuning.
+Adds bounded receive-window auto-tuning, connection-credit retransmission, a stream send-wakeup race fix, packet registration before immediate ACKs and a minimum loss delay for submillisecond RTT. Does not add BBR, packet pacing, an application jitter buffer or path MTU discovery. Applications opt in through enableReceiveWindowAutoTuning.
 
 Release publication requires the core test suite to pass on Linux and Windows. The source archive, source JAR, POM, license texts and SHA-256 checksums accompany the library. This prerelease does not claim compatibility with every network or Minecraft setup.
 '''
