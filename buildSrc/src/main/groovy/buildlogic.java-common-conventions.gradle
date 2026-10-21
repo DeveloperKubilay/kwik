@@ -11,7 +11,7 @@ plugins {
 
 group = 'tech.kwik'
 
-version = '0.11-safra.1'
+version = '0.11.0-safra.1'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
