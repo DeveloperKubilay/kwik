@@ -449,16 +449,14 @@ public class SenderImpl implements Sender, CongestionControlEventListener {
         DatagramPacket datagram = new DatagramPacket(datagramData, buffer.position(), peerAddress.getAddress(), peerAddress.getPort());
 
         Instant timeSent = clock.instant();
+        itemsToSend.forEach(item -> {
+            recoveryManager.packetSent(item.getPacket(), timeSent, item.getPacketLostCallback());
+            idleTimer.packetSent(item.getPacket(), timeSent);
+        });
         socket.send(datagram);
         datagramsSent++;
         packetsSent += itemsToSend.size();
         bytesSent += buffer.position();
-
-        itemsToSend.stream()
-                .forEach(item -> {
-                    recoveryManager.packetSent(item.getPacket(), timeSent, item.getPacketLostCallback());
-                    idleTimer.packetSent(item.getPacket(), timeSent);
-                });
 
         List<QuicPacket> packetsSent = itemsToSend.stream().map(item -> item.getPacket()).collect(Collectors.toList());
         if (packetsSent.stream().anyMatch(p -> p.isAckEliciting())) {
