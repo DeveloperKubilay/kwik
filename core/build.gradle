@@ -29,6 +29,7 @@ def projectVersion = project.version.toString()
 def generatedResourcesDir = layout.buildDirectory.dir("generated")
 
 def includeVersion = tasks.register('includeVersion') {
+    inputs.property 'version', projectVersion
     outputs.dir(generatedResourcesDir)
     doLast {
         def versionDir = new File(generatedResourcesDir.get().asFile, "tech/kwik/core")

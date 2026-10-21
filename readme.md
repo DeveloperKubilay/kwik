@@ -1,3 +1,5 @@
+Kwik bakım fork'u: kaynak, değişiklik ve doğrulama bilgileri [MAINTENANCE.md](MAINTENANCE.md) dosyasında.
+
 ![Kwik](https://bitbucket.org/pjtr/kwik/raw/master/docs/media/Logo_Kwik_rectangle.png)
 
 ## A QUIC implementation in Java
