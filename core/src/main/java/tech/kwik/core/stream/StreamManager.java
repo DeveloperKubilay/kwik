@@ -338,11 +338,20 @@ public class StreamManager {
 
             flowControlMax += size;  // Will not overflow, because receiving Long.MAX_VALUE bytes would take years.
             if (flowControlMax - flowControlLastAdvertised > flowControlIncrement) {
-                connection.send(new MaxDataFrame(flowControlMax), f -> {}, true);
+                connection.send(new MaxDataFrame(flowControlMax), this::retransmitMaxData, true);
                 flowControlLastAdvertised = flowControlMax;
             }
         }
         finally {
+            updateFlowControlLock.unlock();
+        }
+    }
+
+    private void retransmitMaxData(QuicFrame lostFrame) {
+        updateFlowControlLock.lock();
+        try {
+            connection.send(new MaxDataFrame(flowControlMax), this::retransmitMaxData, true);
+        } finally {
             updateFlowControlLock.unlock();
         }
     }
@@ -547,6 +556,10 @@ public class StreamManager {
 
     public long getMaxBidirectionalStreamBufferSize() {
         return config.maxBidirectionalStreamBufferSize();
+    }
+
+    public long getMaxConnectionBufferSize() {
+        return config.maxConnectionBufferSize();
     }
 
     public void setDefaultUnidirectionalStreamReceiveBufferSize(long newSize) {

@@ -11,29 +11,7 @@ plugins {
 
 group = 'tech.kwik'
 
-// Derive the project version from git at configuration time, so that every task
-// (the jar, and the sources/javadoc jars and publications created by the
-// vanniktech plugin) consistently sees the same version. A clean tag like
-// 'v1.0.19' becomes '1.0.19'; any other 'git describe' output (development
-// builds) is used verbatim.
-version = {
-    def proc = "git describe --always --dirty".execute()
-    proc.waitFor()
-    if (proc.exitValue() != 0) {
-        logger.quiet("Building development version.")
-        return 'unspecified'
-    }
-    def versionTag = proc.in.readLines()[0]
-    if (versionTag ==~ /v?[0-9]+(\.\d+){1,2}/) {
-        if (versionTag.startsWith("v")) {
-            versionTag = versionTag[1..-1]
-        }
-        logger.quiet("Building version ${versionTag}.")
-    } else {
-        logger.error("Version tag '${versionTag}' does not contain a valid version.")
-    }
-    return versionTag
-}()
+version = '0.11-safra.1'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
