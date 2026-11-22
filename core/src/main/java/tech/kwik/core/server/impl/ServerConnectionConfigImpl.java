@@ -44,6 +44,7 @@ public class ServerConnectionConfigImpl implements ServerConnectionConfig {
     private ServerConnectionConfig.RetryRequired retryRequired;
     private int connectionIdLength = DEFAULT_CONNECTION_ID_LENGTH;
     private boolean useStrictSmallestAllowedMaximumDatagramSize;
+    private boolean useLowLatencyCongestionControl;
 
     private ServerConnectionConfigImpl() {
     }
@@ -93,6 +94,11 @@ public class ServerConnectionConfigImpl implements ServerConnectionConfig {
         return useStrictSmallestAllowedMaximumDatagramSize;
     }
 
+    @Override
+    public boolean useLowLatencyCongestionControl() {
+        return useLowLatencyCongestionControl;
+    }
+
     public int connectionIdLength() {
         return connectionIdLength;
     }
@@ -134,6 +140,7 @@ public class ServerConnectionConfigImpl implements ServerConnectionConfig {
         configBuilder.retryRequired(this.retryRequired());
         configBuilder.connectionIdLength(this.connectionIdLength());
         configBuilder.useStrictSmallestAllowedMaximumDatagramSize(this.useStrictSmallestAllowedMaximumDatagramSize());
+        configBuilder.useLowLatencyCongestionControl(this.useLowLatencyCongestionControl());
 
         return configBuilder.build();
     }
@@ -308,6 +315,12 @@ public class ServerConnectionConfigImpl implements ServerConnectionConfig {
         @Override
         public Builder useStrictSmallestAllowedMaximumDatagramSize(boolean value) {
             config.useStrictSmallestAllowedMaximumDatagramSize = value;
+            return this;
+        }
+
+        @Override
+        public Builder useLowLatencyCongestionControl(boolean value) {
+            config.useLowLatencyCongestionControl = value;
             return this;
         }
     }

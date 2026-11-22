@@ -466,6 +466,36 @@ class LossDetectorTest extends RecoveryTests {
     }
     //endregion
 
+    //region adaptive reordering
+    @Test
+    void adaptiveReorderingDetectsSpuriousLossAndExpandsThreshold() throws Exception {
+        LossDetector adaptiveDetector = new LossDetector(clock, mock(RecoveryManager.class), rttEstimator,
+                congestionController, () -> {}, new NullQLog(), true);
+
+        adaptiveDetector.packetSent(createPacket(1), clock.instant(), p -> {});
+        adaptiveDetector.packetSent(createPacket(2), clock.instant(), p -> {});
+        adaptiveDetector.packetSent(createPacket(3), clock.instant(), p -> {});
+        adaptiveDetector.packetSent(createPacket(4), clock.instant(), p -> {});
+
+        // ACK [2..4] declares packet 1 lost (kPacketThreshold=3)
+        adaptiveDetector.onAckReceived(new AckFrame(new Range(2L, 4L)), clock.instant());
+        verify(congestionController, times(1)).registerLost(anyList());
+
+        // Later ACK includes original packet 1 -> confirmed spurious loss!
+        clock.fastForward(15);
+        adaptiveDetector.onAckReceived(new AckFrame(new Range(1L, 1L)), clock.instant());
+        verify(congestionController, times(1)).onSpuriousLoss();
+
+        // Expanded threshold (now >= 5) prevents false loss with 3-packet gap
+        clearInvocations(congestionController);
+        for (int pn = 10; pn <= 14; pn++) {
+            adaptiveDetector.packetSent(createPacket(pn), clock.instant(), p -> {});
+        }
+        adaptiveDetector.onAckReceived(new AckFrame(new Range(11L, 14L)), clock.instant());
+        verify(congestionController, never()).registerLost(anyList());
+    }
+    //endregion
+
     //region helper methods
     // This test was used to reproduce a race condition in the LossDetector. It is of no use to run it in each build.
     // To check the test is actually testing the race condition, insert system.out.print's in reset and onAckReceived methods.

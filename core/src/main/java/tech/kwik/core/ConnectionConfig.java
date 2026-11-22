@@ -64,4 +64,11 @@ public interface ConnectionConfig {
      * @return whether to apply the strict interpretation of RFC-9000 with respect to the smallest allowed maximum datagram size.
      */
     boolean useStrictSmallestAllowedMaximumDatagramSize();
+
+    /**
+     * @return whether to enable opt-in low-latency congestion control, packet pacing, and adaptive reordering.
+     */
+    default boolean useLowLatencyCongestionControl() {
+        return false;
+    }
 }

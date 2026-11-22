@@ -44,7 +44,7 @@ notes = f'''Maintenance build of Kwik {version}.
 
 Source commit: `{revision}`. Upstream base: `1be72817017d45dd3f7686b253a9a8343e9681de`.
 
-Adds opt-in bounded receive-window auto-tuning, retransmission of lost connection credit and packet registration before immediate ACKs. Upstream 0.12.1 already contains the stream send-wakeup and minimum loss-delay fixes, and uses agent15 4.0. Does not add BBR, packet pacing, an application jitter buffer or path MTU discovery. Applications opt in through enableReceiveWindowAutoTuning.
+Adds opt-in bounded receive-window auto-tuning, retransmission of lost connection credit, packet registration before immediate ACKs, and opt-in low-latency transport enhancements (delay-aware congestion control, 10s windowed min-RTT, adaptive reordering with spurious-loss undo, and token-bucket packet pacing). Upstream 0.12.1 already contains the stream send-wakeup and minimum loss-delay fixes, and uses agent15 4.0. Does not add BBR, an application jitter buffer or path MTU discovery. Applications opt in through enableReceiveWindowAutoTuning and useLowLatencyCongestionControl.
 
 Release publication requires the core test suite to pass on Linux and Windows. The source archive, source JAR, POM, license texts and SHA-256 checksums accompany the library. This prerelease does not claim compatibility with every network or Minecraft setup.
 '''

@@ -152,7 +152,8 @@ public class ServerConnectionImpl extends QuicConnectionImpl implements ServerCo
 
         idleTimer = new IdleTimer(this, log);
         socketManager = new ServerConnectionSocketManager(serverSocket, initialClientAddress);
-        sender = new SenderImpl(quicVersion, getMaxPacketSize(), socketManager, this, Bytes.bytesToHex(originalDcid), configuration.initialRtt(), this.log);
+        sender = new SenderImpl(quicVersion, getMaxPacketSize(), socketManager, this, Bytes.bytesToHex(originalDcid),
+                configuration.initialRtt(), this.log, configuration.useLowLatencyCongestionControl());
         connectionIdManager.setSender(sender);
 
         if (retrySourceConnectionId != null) {

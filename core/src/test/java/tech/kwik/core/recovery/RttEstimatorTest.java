@@ -228,4 +228,22 @@ class RttEstimatorTest {
 
         assertThat(rttEstimator.getSmoothedRtt()).isGreaterThan(1000);
     }
+
+    @Test
+    void windowedMinRttExpiresAfterRouteMigrationToHigherLatency() {
+        Instant t0 = Instant.now();
+        rttEstimator.addSample(t0.plusMillis(10), t0, 0);
+        assertThat(rttEstimator.getMinRtt()).isEqualTo(10);
+        assertThat(rttEstimator.getWindowedMinRtt()).isEqualTo(10);
+
+        // Migrate after 11s and keep sampling at 120ms across window rotation
+        Instant t1 = t0.plusMillis(11_000);
+        rttEstimator.addSample(t1, t1.minusMillis(120), 0);
+        assertThat(rttEstimator.getWindowedMinRtt()).isEqualTo(10);
+
+        Instant t2 = t1.plusMillis(11_000);
+        rttEstimator.addSample(t2, t2.minusMillis(120), 0);
+        assertThat(rttEstimator.getWindowedMinRtt()).isEqualTo(120);
+        assertThat(rttEstimator.getMinRtt()).isEqualTo(10);
+    }
 }

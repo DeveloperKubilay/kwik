@@ -200,7 +200,8 @@ public class QuicClientConnectionImpl extends QuicConnectionImpl implements Quic
         socketManager = new ClientSocketManager(new InetSocketAddress(serverAddress, port), receiver, socketFactory);
         connectionIdManager.registerClientAddress(socketManager.getClientAddress());
 
-        sender = new SenderImpl(quicVersion, getMaxPacketSize(), socketManager, this, "", initialRtt, log);
+        sender = new SenderImpl(quicVersion, getMaxPacketSize(), socketManager, this, "", initialRtt, log,
+                connectionProperties.useLowLatencyCongestionControl());
         sender.enableAllLevels();
         connectionIdManager.setSender(sender);
         idleTimer.setPtoSupplier(sender::getPto);
@@ -1847,6 +1848,11 @@ public class QuicClientConnectionImpl extends QuicConnectionImpl implements Quic
          */
         public void enforceMaxUdpPayloadSize(boolean enforce) {
             connectionProperties.setEnforceMaxUdpPayloadSize(enforce);
+        }
+
+        public ExtendedBuilder useLowLatencyCongestionControl(boolean value) {
+            connectionProperties.setUseLowLatencyCongestionControl(value);
+            return this;
         }
     }
 }

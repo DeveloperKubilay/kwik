@@ -50,6 +50,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -251,6 +252,37 @@ class SenderImplTest extends AbstractSenderTest {
 
         // Then
         verify(socketManager, never()).send(any(ByteBuffer.class), any(InetSocketAddress.class));
+    }
+
+    @Test
+    void pacingLimitsAppDataBurstWhileAllowingAcksAndProbesImmediately() throws Exception {
+        ConnectionIdManager cidProvider = mock(ConnectionIdManager.class);
+        when(cidProvider.getInitialConnectionId()).thenReturn(new byte[4]);
+        when(cidProvider.getPeerConnectionId(any())).thenReturn(new byte[4]);
+        QuicConnectionImpl connection = mock(QuicConnectionImpl.class);
+        when(connection.getSourceConnectionId()).thenReturn(new byte[4]);
+        when(connection.getIdleTimer()).thenReturn(new IdleTimer(connection, new NullLogger()));
+        when(connection.getConnectionIdManager()).thenReturn(cidProvider);
+
+        AtomicLong nowNanos = new AtomicLong(1_000_000_000L);
+        SenderImpl pacedSender = new SenderImpl(clock, new VersionHolder(Version.getDefault()), 1200,
+                socketManager, connection, "", 100, new NullLogger(), true, nowNanos::get);
+        FieldSetter.setField(pacedSender, SenderImpl.class.getDeclaredField("connectionSecrets"), connectionSecrets);
+        pacedSender.enableAllLevels();
+
+        // Queue 8 large stream frames (only initial burst of 5 packets fits before budget turns negative)
+        for (int i = 0; i < 8; i++) {
+            pacedSender.send(new StreamFrame(0, i * 1100, new byte[1100], false), EncryptionLevel.App);
+        }
+        pacedSender.sendIfAny();
+
+        verify(socketManager, times(5)).send(any(ByteBuffer.class), any(InetSocketAddress.class));
+        assertThat(pacedSender.determineMaximumWaitTime()).isBetween(1L, 100L);
+
+        // Even while stream data is paced, a probe still sends immediately (0ms delay)!
+        pacedSender.sendProbe(EncryptionLevel.App);
+        pacedSender.sendIfAny();
+        verify(socketManager, times(6)).send(any(ByteBuffer.class), any(InetSocketAddress.class));
     }
 
     private <T> List<T> mutableListOf(T item) {

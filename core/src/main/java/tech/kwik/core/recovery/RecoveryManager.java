@@ -120,16 +120,24 @@ public class RecoveryManager implements FrameReceivedListener<AckFrame>, Handsha
     private volatile boolean hasBeenStopped = false;
 
     public RecoveryManager(Role role, RttEstimator rttEstimater, CongestionController congestionController, Sender sender, Logger logger) {
-        this(Clock.systemUTC(), role, rttEstimater, congestionController, sender, logger);
+        this(Clock.systemUTC(), role, rttEstimater, congestionController, sender, logger, false);
     }
 
     public RecoveryManager(Clock clock, Role role, RttEstimator rttEstimater, CongestionController congestionController, Sender sender, Logger logger) {
+        this(clock, role, rttEstimater, congestionController, sender, logger, false);
+    }
+
+    public RecoveryManager(Role role, RttEstimator rttEstimater, CongestionController congestionController, Sender sender, Logger logger, boolean adaptiveReordering) {
+        this(Clock.systemUTC(), role, rttEstimater, congestionController, sender, logger, adaptiveReordering);
+    }
+
+    public RecoveryManager(Clock clock, Role role, RttEstimator rttEstimater, CongestionController congestionController, Sender sender, Logger logger, boolean adaptiveReordering) {
         this.clock = clock;
         this.role = role;
         this.rttEstimater = rttEstimater;
         this.congestionController = congestionController;
         for (PnSpace pnSpace: PnSpace.values()) {
-            lossDetectors[pnSpace.ordinal()] = new LossDetector(clock ,this, rttEstimater, congestionController, () -> sender.flush(), logger.getQLog());
+            lossDetectors[pnSpace.ordinal()] = new LossDetector(clock ,this, rttEstimater, congestionController, () -> sender.flush(), logger.getQLog(), adaptiveReordering);
         }
         this.sender = sender;
         log = logger;

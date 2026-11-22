@@ -25,10 +25,14 @@ import tech.kwik.core.packet.PacketInfo;
 import tech.kwik.core.packet.QuicPacket;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,18 +42,26 @@ import java.util.stream.Collectors;
 
 public class LossDetector {
 
+    private static final int MAX_PACKET_THRESHOLD = 64;
+    private static final float MAX_TIME_THRESHOLD = 2.0f;
+    private static final int MAX_RECENTLY_LOST = 128;
+
     private final Clock clock;
     private final RecoveryManager recoveryManager;
     private final RttEstimator rttEstimater;
     private final CongestionController congestionController;
     private final Runnable postProcessLostCallback;
     private final QLog qLog;
+    private final boolean adaptiveReordering;
     private final float kTimeThreshold = 9f/8f;
     private final int kPacketThreshold = 3;
+    private volatile float timeThreshold = kTimeThreshold;
+    private volatile int packetThreshold = kPacketThreshold;
     // https://www.rfc-editor.org/rfc/rfc9002.html#section-a.2
     // "Timer granularity. This is a system-dependent value, and Section 6.1.2 recommends a value of 1 ms."
     private final int kGranularity = 1;
     private final SortedMap<Long, PacketStatus> packetSentLog;
+    private final Map<Long, LostPacketRecord> recentlyLost;
     private final AtomicInteger ackElicitingInFlight;
     private volatile long largestAcked = -1;
     private volatile long lost;
@@ -59,19 +71,30 @@ public class LossDetector {
 
 
     public LossDetector(RecoveryManager recoveryManager, RttEstimator rttEstimator, CongestionController congestionController, Runnable postProcessLostCallback, QLog qLog) {
-        this(Clock.systemUTC(), recoveryManager, rttEstimator, congestionController, postProcessLostCallback, qLog);
+        this(Clock.systemUTC(), recoveryManager, rttEstimator, congestionController, postProcessLostCallback, qLog, false);
     }
 
     public LossDetector(Clock clock, RecoveryManager recoveryManager, RttEstimator rttEstimator, CongestionController congestionController, Runnable postProcessLostCallback, QLog qLog) {
+        this(clock, recoveryManager, rttEstimator, congestionController, postProcessLostCallback, qLog, false);
+    }
+
+    public LossDetector(Clock clock, RecoveryManager recoveryManager, RttEstimator rttEstimator, CongestionController congestionController, Runnable postProcessLostCallback, QLog qLog, boolean adaptiveReordering) {
         this.clock = clock;
         this.recoveryManager = recoveryManager;
         this.rttEstimater = rttEstimator;
         this.congestionController = congestionController;
         this.postProcessLostCallback = postProcessLostCallback;
         this.qLog = qLog;
+        this.adaptiveReordering = adaptiveReordering;
 
         ackElicitingInFlight = new AtomicInteger();
         packetSentLog = new ConcurrentSkipListMap<>();
+        recentlyLost = Collections.synchronizedMap(new LinkedHashMap<Long, LostPacketRecord>(16, 0.75f, false) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Long, LostPacketRecord> eldest) {
+                return size() > MAX_RECENTLY_LOST;
+            }
+        });
     }
 
     public synchronized void packetSent(QuicPacket packet, Instant sent, Consumer<QuicPacket> lostPacketCallback) {
@@ -101,6 +124,10 @@ public class LossDetector {
 
         largestAcked = Long.max(largestAcked, ackFrame.getLargestAcknowledged());
 
+        if (adaptiveReordering) {
+            checkSpuriousLosses(ackFrame, timeReceived);
+        }
+
         List<PacketStatus> newlyAcked = determineNewlyAcked(ackFrame);
         if (newlyAcked.isEmpty()) {
              return;
@@ -110,16 +137,43 @@ public class LossDetector {
         assert ackedAckEliciting <= ackElicitingInFlight.get();
         ackElicitingInFlight.getAndAdd(-1 * ackedAckEliciting);
 
-        congestionController.registerAcked(filterInFlight(newlyAcked));
+        rttEstimater.ackReceived(ackFrame, timeReceived, newlyAcked);
 
         detectLostPackets();
 
-        recoveryManager.setLossDetectionTimer();
+        congestionController.registerAcked(filterInFlight(newlyAcked));
 
-        rttEstimater.ackReceived(ackFrame, timeReceived, newlyAcked);
+        recoveryManager.setLossDetectionTimer();
 
         // Cleanup
         newlyAcked.stream().forEach(p -> packetSentLog.remove(p.packet().getPacketNumber()));
+    }
+
+    private void checkSpuriousLosses(AckFrame ackFrame, Instant timeReceived) {
+        long smallestTrackedPn;
+        synchronized (recentlyLost) {
+            if (recentlyLost.isEmpty()) {
+                return;
+            }
+            smallestTrackedPn = Collections.min(recentlyLost.keySet());
+        }
+        List<Long> ackedTrackedPns = ackFrame.getAckedPacketNumbers(smallestTrackedPn)
+                .collect(Collectors.toList());
+        boolean detectedSpuriousLoss = false;
+        for (Long pn : ackedTrackedPns) {
+            LostPacketRecord record = recentlyLost.remove(pn);
+            if (record != null) {
+                detectedSpuriousLoss = true;
+                int reorderSpan = (int) Long.min(MAX_PACKET_THRESHOLD, Long.max(1L, record.largestAckedAtLoss - pn + 2L));
+                packetThreshold = Integer.min(MAX_PACKET_THRESHOLD, Integer.max(packetThreshold + 2, reorderSpan));
+                if (Duration.between(record.timeSent, timeReceived).toMillis() >= record.lossDelayMs) {
+                    timeThreshold = Float.min(MAX_TIME_THRESHOLD, timeThreshold + 0.25f);
+                }
+            }
+        }
+        if (detectedSpuriousLoss) {
+            congestionController.onSpuriousLoss();
+        }
     }
 
     /**
@@ -145,6 +199,7 @@ public class LossDetector {
         congestionController.discard(inflightPackets);
         ackElicitingInFlight.set(0);
         packetSentLog.clear();
+        recentlyLost.clear();
         lossTime = null;
         lastAckElicitingSent = null;
         isClosed = true;
@@ -160,11 +215,14 @@ public class LossDetector {
                 .collect(Collectors.toList());
         congestionController.discard(inflightPackets);
         packetSentLog.clear();
+        recentlyLost.clear();
         ackElicitingInFlight.set(0);
         lossTime = null;
         lastAckElicitingSent = null;
         largestAcked = -1;
         lost = 0;
+        packetThreshold = kPacketThreshold;
+        timeThreshold = kTimeThreshold;
     }
 
     /**
@@ -176,7 +234,7 @@ public class LossDetector {
             return;
         }
 
-        int lossDelay = (int) (kTimeThreshold * Integer.max(rttEstimater.getSmoothedRtt(), rttEstimater.getLatestRtt()));
+        int lossDelay = (int) (timeThreshold * Integer.max(rttEstimater.getSmoothedRtt(), rttEstimater.getLatestRtt()));
         // https://www.rfc-editor.org/rfc/rfc9002.html#section-6.1.2
         // "To avoid declaring packets as lost too early, this time threshold MUST be set to at least the local timer
         //  granularity, as indicated by the kGranularity constant. "
@@ -212,7 +270,7 @@ public class LossDetector {
         }
 
         if (!lostPackets.isEmpty()) {
-            declareLost(lostPackets);
+            declareLost(lostPackets, lossDelay);
         }
 
         if (earliestSentTime != null && earliestSentTime.isAfter(lostSendTime)) {
@@ -252,14 +310,14 @@ public class LossDetector {
     }
 
     private boolean pnTooOld(PacketStatus p) {
-        return p.packet().getPacketNumber() <= largestAcked - kPacketThreshold;
+        return p.packet().getPacketNumber() <= largestAcked - packetThreshold;
     }
 
     private boolean sentTimeTooLongAgo(PacketStatus p, Instant lostSendTime) {
         return p.packet().getPacketNumber() <= largestAcked && p.timeSent().isBefore(lostSendTime);
     }
 
-    private void declareLost(List<PacketStatus> lostPacketsInfo) {
+    private void declareLost(List<PacketStatus> lostPacketsInfo, int lossDelayMs) {
         lostPacketsInfo = lostPacketsInfo.stream()
                 .filter(packetStatus -> packetStatus.setLost())   // Only keep the ones that actually were set to lost
                 .collect(Collectors.toList());
@@ -281,6 +339,15 @@ public class LossDetector {
 
         congestionController.registerLost(filterInFlight(lostPacketsInfo));
 
+        if (adaptiveReordering) {
+            long largestAtLoss = largestAcked;
+            for (PacketStatus p : lostPacketsInfo) {
+                if (p.packet().isInflightPacket()) {
+                    recentlyLost.put(p.packet().getPacketNumber(), new LostPacketRecord(largestAtLoss, p.timeSent(), lossDelayMs));
+                }
+            }
+        }
+
         // Cleanup
         lostPacketsInfo.stream().forEach(p -> packetSentLog.remove(p.packet().getPacketNumber()));
     }
@@ -297,6 +364,18 @@ public class LossDetector {
 
     public boolean noAckedReceived() {
         return largestAcked < 0;
+    }
+
+    private static final class LostPacketRecord {
+        private final long largestAckedAtLoss;
+        private final Instant timeSent;
+        private final int lossDelayMs;
+
+        private LostPacketRecord(long largestAckedAtLoss, Instant timeSent, int lossDelayMs) {
+            this.largestAckedAtLoss = largestAckedAtLoss;
+            this.timeSent = timeSent;
+            this.lossDelayMs = lossDelayMs;
+        }
     }
 
 }

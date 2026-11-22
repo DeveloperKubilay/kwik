@@ -65,5 +65,7 @@ public interface ServerConnectionConfig extends ConnectionConfig {
         Builder maxTotalPeerInitiatedBidirectionalStreams(long max);
 
         Builder useStrictSmallestAllowedMaximumDatagramSize(boolean value);
+
+        Builder useLowLatencyCongestionControl(boolean value);
     }
 }

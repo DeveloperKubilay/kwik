@@ -42,4 +42,11 @@ public interface CongestionController {
     void discard(List<? extends PacketInfo> packetStatusStream);
 
     long remainingCwnd();
+
+    default void onSpuriousLoss() {
+    }
+
+    default long getPacingRateBytesPerSecond(int rttMs) {
+        return Long.MAX_VALUE;
+    }
 }

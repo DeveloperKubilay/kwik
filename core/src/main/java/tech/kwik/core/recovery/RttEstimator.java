@@ -30,11 +30,15 @@ import java.util.Optional;
 public class RttEstimator implements RttProvider {
 
     private static final int NOT_SET = -1;
+    private static final long MIN_RTT_WINDOW_MS = 10_000L;
 
     private final Logger log;
     // All intervals are in milliseconds (1/1000 second)
     private volatile int initialRtt;
     private volatile int minRtt = Integer.MAX_VALUE;
+    private volatile int currentWindowMinRtt = Integer.MAX_VALUE;
+    private volatile int previousWindowMinRtt = Integer.MAX_VALUE;
+    private volatile Instant minRttWindowStart;
     private volatile int smoothedRtt = NOT_SET;
     private volatile int rttVar = NOT_SET;
     private volatile int latestRtt;
@@ -73,6 +77,7 @@ public class RttEstimator implements RttProvider {
         int previousSmoothed = smoothedRtt;
 
         int rttSample = (int) Duration.between(timeSent, timeReceived).toMillis();
+        updateWindowedMinRtt(timeReceived, rttSample);
         if (rttSample < minRtt)
             minRtt = rttSample;
         // Adjust for ack delay if it's plausible. Because times are truncated at millisecond precision,
@@ -141,7 +146,37 @@ public class RttEstimator implements RttProvider {
         return latestRtt;
     }
 
+    public int getMinRtt() {
+        return minRtt == Integer.MAX_VALUE ? getSmoothedRtt() : minRtt;
+    }
+
+    public int getWindowedMinRtt() {
+        return minRttWindowStart == null ? getSmoothedRtt() : Integer.min(currentWindowMinRtt, previousWindowMinRtt);
+    }
+
+    public boolean hasRttSample() {
+        return smoothedRtt != NOT_SET;
+    }
+
     public void setMaxAckDelay(int maxAckDelay) {
         this.maxAckDelay = maxAckDelay;
+    }
+
+    private void updateWindowedMinRtt(Instant timeReceived, int rttSample) {
+        if (minRttWindowStart == null) {
+            minRttWindowStart = timeReceived;
+            currentWindowMinRtt = rttSample;
+            previousWindowMinRtt = rttSample;
+            return;
+        }
+        long elapsedMs = Duration.between(minRttWindowStart, timeReceived).toMillis();
+        if (elapsedMs >= MIN_RTT_WINDOW_MS) {
+            previousWindowMinRtt = elapsedMs >= 2 * MIN_RTT_WINDOW_MS ? rttSample : currentWindowMinRtt;
+            currentWindowMinRtt = rttSample;
+            minRttWindowStart = timeReceived;
+        }
+        else if (rttSample < currentWindowMinRtt) {
+            currentWindowMinRtt = rttSample;
+        }
     }
 }

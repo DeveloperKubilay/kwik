@@ -21,6 +21,7 @@ package tech.kwik.core.send;
 import tech.kwik.core.ack.GlobalAckGenerator;
 import tech.kwik.core.cc.CongestionControlEventListener;
 import tech.kwik.core.cc.CongestionController;
+import tech.kwik.core.cc.DelayAwareCongestionController;
 import tech.kwik.core.cc.NewRenoCongestionController;
 import tech.kwik.core.common.EncryptionLevel;
 import tech.kwik.core.common.PnSpace;
@@ -57,6 +58,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 
 import static java.lang.Long.max;
@@ -116,21 +118,35 @@ public class SenderImpl implements Sender, CongestionControlEventListener {
     private volatile Runnable shutdownHook;
     private volatile Instant lastestAckElicitingTime;
     private final byte[] paddingPattern;
+    private final PacketPacer pacer;
+    private final LongSupplier nanoTimeSupplier;
 
 
     public SenderImpl(VersionHolder version, int maxPacketSize, SocketManager socketManager, QuicConnectionImpl connection,
                       String id, Integer initialRtt, Logger log) {
-        this(Clock.systemUTC(), version, maxPacketSize, socketManager, connection, id, initialRtt, log);
+        this(Clock.systemUTC(), version, maxPacketSize, socketManager, connection, id, initialRtt, log, false, System::nanoTime);
+    }
+
+    public SenderImpl(VersionHolder version, int maxPacketSize, SocketManager socketManager, QuicConnectionImpl connection,
+                      String id, Integer initialRtt, Logger log, boolean lowLatencyMode) {
+        this(Clock.systemUTC(), version, maxPacketSize, socketManager, connection, id, initialRtt, log, lowLatencyMode, System::nanoTime);
     }
 
     public SenderImpl(Clock clock, VersionHolder version, int maxPacketSize, SocketManager socketManager,
                       QuicConnectionImpl connection, String id, Integer initialRtt, Logger log) {
+        this(clock, version, maxPacketSize, socketManager, connection, id, initialRtt, log, false, System::nanoTime);
+    }
+
+    SenderImpl(Clock clock, VersionHolder version, int maxPacketSize, SocketManager socketManager,
+               QuicConnectionImpl connection, String id, Integer initialRtt, Logger log,
+               boolean lowLatencyMode, LongSupplier nanoTimeSupplier) {
         this.clock = clock;
         this.maxPacketSize = maxPacketSize;
         this.socketManager = socketManager;
         this.connection = connection;
         this.log = log;
         this.qlog = log.getQLog();
+        this.nanoTimeSupplier = nanoTimeSupplier;
 
         Arrays.stream(EncryptionLevel.values()).forEach(level -> {
             int levelIndex = level.ordinal();
@@ -139,9 +155,16 @@ public class SenderImpl implements Sender, CongestionControlEventListener {
 
         rttEstimater = (initialRtt == null)? new RttEstimator(log): new RttEstimator(log, initialRtt);
 
-        congestionController = new NewRenoCongestionController(log, this);
-
-        recoveryManager = new RecoveryManager(connection.getRole(), rttEstimater, congestionController, this, log);
+        if (lowLatencyMode) {
+            congestionController = new DelayAwareCongestionController(clock, rttEstimater, log, this);
+            recoveryManager = new RecoveryManager(clock, connection.getRole(), rttEstimater, congestionController, this, log, true);
+            pacer = new PacketPacer(maxPacketSize, nanoTimeSupplier);
+        }
+        else {
+            congestionController = new NewRenoCongestionController(log, this);
+            recoveryManager = new RecoveryManager(clock, connection.getRole(), rttEstimater, congestionController, this, log, false);
+            pacer = null;
+        }
         connection.addHandshakeStateListener(recoveryManager);
         connection.addAckFrameReceivedListener(recoveryManager);
 
@@ -374,13 +397,14 @@ public class SenderImpl implements Sender, CongestionControlEventListener {
      * @return
      */
     long determineMaximumWaitTime() {
+        long waitTime = 5000;
         Optional<Instant> nextDelayedSendTime = packetAssembler.nextDelayedSendTime();
         if (nextDelayedSendTime.isPresent()) {
             long delay = max(Duration.between(clock.instant(), nextDelayedSendTime.get()).toMillis(), 0);
             if (delay > 0) {
                 subsequentZeroDelays.set(0);
                 lastDelayWasZero = false;
-                return delay;
+                waitTime = delay;
             }
             else {
                 if (lastDelayWasZero) {
@@ -394,14 +418,28 @@ public class SenderImpl implements Sender, CongestionControlEventListener {
                 }
                 lastDelayWasZero = true;
                 // Next time is already in the past, hurry up!
-                return 0;
+                waitTime = 0;
+            }
+        }
+
+        if (pacer != null && pacer.isPacedPending()) {
+            if (!sendRequestQueue[EncryptionLevel.App.ordinal()].hasRequests()) {
+                pacer.setPacedPending(false);
+            }
+            else {
+                long pacingDelay = pacer.getDelayMillis(nanoTimeSupplier.getAsLong(), pacingRateBps(), congestionController.getWindowSize());
+                if (pacingDelay == 0L) {
+                    pacer.setPacedPending(false);
+                    return 0L;
+                }
+                waitTime = Math.min(waitTime, pacingDelay);
             }
         }
 
         // No timeout needed, just wait for next action. In theory, infinity should be returned.
         // However, in order to somewhat forgiving for bugs that would lead to deadlocking the sender, use a
         // value that will keep the connection going, but also indicates there is something wrong.
-        return 5000;
+        return waitTime;
     }
 
     void send(AssembledDatagram assembledDatagram) throws IOException {
@@ -451,6 +489,14 @@ public class SenderImpl implements Sender, CongestionControlEventListener {
         datagramsSent++;
         packetsSent += itemsToSend.size();
         bytesSent += buffer.position();
+        if (pacer != null) {
+            boolean hasCongestionControlledAppPacket = itemsToSend.stream()
+                    .map(SendItem::getPacket)
+                    .anyMatch(p -> p instanceof ShortHeaderPacket && p.isInflightPacket() && !p.isProbe());
+            if (hasCongestionControlledAppPacket) {
+                pacer.onDataPacketSent(buffer.position(), nanoTimeSupplier.getAsLong(), pacingRateBps(), congestionController.getWindowSize());
+            }
+        }
 
         List<QuicPacket> packetsSent = itemsToSend.stream().map(item -> item.getPacket()).collect(Collectors.toList());
         if (packetsSent.stream().anyMatch(p -> p.isAckEliciting())) {
@@ -490,7 +536,30 @@ public class SenderImpl implements Sender, CongestionControlEventListener {
             }
         }
 
-        return packetAssembler.assemble(remainingCwnd, currentMaxPacketSize, socketManager.getClientAddress());
+        boolean handshakePending = sendRequestQueue[EncryptionLevel.Initial.ordinal()].hasRequests()
+                || sendRequestQueue[EncryptionLevel.Handshake.ordinal()].hasRequests();
+        boolean pacingBlocked = false;
+        if (pacer != null && remainingCwnd > 0 && !handshakePending) {
+            if (!pacer.canSendData(nanoTimeSupplier.getAsLong(), pacingRateBps(), congestionController.getWindowSize())) {
+                remainingCwnd = 0;
+                pacingBlocked = true;
+            }
+        }
+
+        AssembledDatagram assembled = packetAssembler.assemble(remainingCwnd, currentMaxPacketSize, socketManager.getClientAddress());
+        if (pacer != null) {
+            if (pacingBlocked && assembled.isEmpty()) {
+                pacer.setPacedPending(sendRequestQueue[EncryptionLevel.App.ordinal()].hasRequests());
+            }
+            else if (!pacingBlocked) {
+                pacer.setPacedPending(false);
+            }
+        }
+        return assembled;
+    }
+
+    private long pacingRateBps() {
+        return congestionController.getPacingRateBytesPerSecond(rttEstimater.getSmoothedRtt());
     }
 
     @Override
