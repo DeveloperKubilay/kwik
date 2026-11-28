@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
+import tech.kwik.core.cc.AbstractCongestionController;
 import tech.kwik.core.cid.ConnectionIdManager;
 import tech.kwik.core.common.EncryptionLevel;
 import tech.kwik.core.common.PnSpace;
@@ -283,6 +284,43 @@ class SenderImplTest extends AbstractSenderTest {
         pacedSender.sendProbe(EncryptionLevel.App);
         pacedSender.sendIfAny();
         verify(socketManager, times(6)).send(any(ByteBuffer.class), any(InetSocketAddress.class));
+    }
+
+    @Test
+    void pacedWakeupAfterOsTimerTickSendsFullActiveBurstInsteadOfFourPackets() throws Exception {
+        ConnectionIdManager cidProvider = mock(ConnectionIdManager.class);
+        when(cidProvider.getInitialConnectionId()).thenReturn(new byte[4]);
+        when(cidProvider.getPeerConnectionId(any())).thenReturn(new byte[4]);
+        QuicConnectionImpl connection = mock(QuicConnectionImpl.class);
+        when(connection.getSourceConnectionId()).thenReturn(new byte[4]);
+        when(connection.getIdleTimer()).thenReturn(new IdleTimer(connection, new NullLogger()));
+        when(connection.getConnectionIdManager()).thenReturn(cidProvider);
+
+        AtomicLong nowNanos = new AtomicLong(1_000_000_000L);
+        SenderImpl pacedSender = new SenderImpl(clock, new VersionHolder(Version.getDefault()), 1200,
+                socketManager, connection, "", 20, new NullLogger(), true, nowNanos::get);
+        FieldSetter.setField(pacedSender, SenderImpl.class.getDeclaredField("connectionSecrets"), connectionSecrets);
+        FieldSetter.setField(pacedSender.getCongestionController(),
+                AbstractCongestionController.class.getDeclaredField("congestionWindow"), 48_000L);
+        pacedSender.enableAllLevels();
+
+        for (int i = 0; i < 20; i++) {
+            pacedSender.send(new StreamFrame(0, i * 1100, new byte[1100], false), EncryptionLevel.App);
+        }
+        pacedSender.sendIfAny();
+        verify(socketManager, times(5)).send(any(ByteBuffer.class), any(InetSocketAddress.class));
+
+        // 15ms OS timer tick refills active burst (cwnd/2 = 24,000 B -> 20 packets)
+        nowNanos.addAndGet(15_000_000L);
+        assertThat(pacedSender.determineMaximumWaitTime()).isEqualTo(0L);
+        pacedSender.sendIfAny();
+        verify(socketManager, times(20)).send(any(ByteBuffer.class), any(InetSocketAddress.class));
+
+        // When CWND is exhausted, determineMaximumWaitTime must NOT busy-spin at 0ms
+        FieldSetter.setField(pacedSender.getCongestionController(),
+                AbstractCongestionController.class.getDeclaredField("congestionWindow"), 12_000L);
+        pacedSender.send(new StreamFrame(0, 20 * 1100, new byte[1100], false), EncryptionLevel.App);
+        assertThat(pacedSender.determineMaximumWaitTime()).isGreaterThan(0L);
     }
 
     private <T> List<T> mutableListOf(T item) {

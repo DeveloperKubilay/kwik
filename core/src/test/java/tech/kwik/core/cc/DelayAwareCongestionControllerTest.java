@@ -158,4 +158,103 @@ class DelayAwareCongestionControllerTest {
         controller.onSpuriousLoss();
         assertThat(controller.getWindowSize()).isEqualTo(cwndBeforeLoss);
     }
+
+    @Test
+    void appLimitedIdleTrafficDoesNotPoisonDeliveryRateOrTriggerDelayBackoff() {
+        // Grow cwnd >= 80 KB at 5ms RTT so recentDeliveryRateBps reflects high link speed
+        for (int i = 0; i < 80; i++) {
+            QuicPacket p = new MockPacket(i, 1200, "");
+            controller.registerInFlight(p);
+            Instant sent = clock.instant();
+            clock.fastForward(5);
+            rttEstimator.addSample(clock.instant(), sent, 0);
+            if (controller.remainingCwnd() > 3600) {
+                QuicPacket filler = new MockPacket(500 + i, (int) controller.remainingCwnd(), "");
+                controller.registerInFlight(filler);
+                controller.registerAcked(List.of(
+                        new PacketInfo(sent, p, x -> {}),
+                        new PacketInfo(sent, filler, x -> {})));
+            }
+            else {
+                controller.registerAcked(List.of(new PacketInfo(sent, p, x -> {})));
+            }
+        }
+        double peakDeliveryRate = controller.getRecentDeliveryRateBytesPerSecond();
+        long peakCwnd = controller.getWindowSize();
+        assertThat(peakDeliveryRate).isGreaterThan(0.0);
+        assertThat(peakCwnd).isGreaterThanOrEqualTo(80_000L);
+
+        // Simulate a brief application pause (> maxValidRoundMs = 500ms) before app-limited traffic
+        clock.fastForward(600);
+
+        // App-limited traffic: bytesInFlight << cwnd across a round with 65ms RTT samples
+        for (int i = 0; i < 6; i++) {
+            QuicPacket p = new MockPacket(1000 + i, 1200, "");
+            controller.registerInFlight(p);
+            Instant sent = clock.instant();
+            clock.fastForward(65);
+            rttEstimator.addSample(clock.instant(), sent, 0);
+            controller.registerAcked(List.of(new PacketInfo(sent, p, x -> {})));
+        }
+
+        assertThat(controller.getRecentDeliveryRateBytesPerSecond()).isGreaterThanOrEqualTo(peakDeliveryRate);
+        assertThat(controller.getWindowSize()).isGreaterThanOrEqualTo(peakCwnd);
+    }
+
+    @Test
+    void delayBackoffRespects24MssFloorAndRecoversQuicklyOnCleanRounds() {
+        // Seed baseline 20ms RTT and enter congestion avoidance via packet loss above 24 * 1200
+        for (int i = 0; i < 30; i++) {
+            QuicPacket p = new MockPacket(i, 1200, "");
+            controller.registerInFlight(p);
+            Instant sent = clock.instant();
+            clock.fastForward(20);
+            rttEstimator.addSample(clock.instant(), sent, 0);
+            if (controller.remainingCwnd() > 3600) {
+                QuicPacket filler = new MockPacket(200 + i, (int) (controller.remainingCwnd() - 1200), "");
+                controller.registerInFlight(filler);
+            }
+            controller.registerAcked(List.of(new PacketInfo(sent, p, x -> {})));
+        }
+        QuicPacket lost = new MockPacket(999, 1200, "");
+        controller.registerInFlight(lost);
+        controller.registerLost(List.of(new PacketInfo(clock.instant(), lost, p -> {})));
+        assertThat(controller.isInSlowStart()).isFalse();
+
+        // Trigger multiple severe delay rounds while cwnd-limited; cwnd must stay >= 24 * 1200 (28,800 B)
+        for (int round = 0; round < 4; round++) {
+            clock.fastForward(100);
+            for (int i = 0; i < 5; i++) {
+                QuicPacket p = new MockPacket(400 + round * 10 + i, 1200, "");
+                controller.registerInFlight(p);
+                Instant sent = clock.instant();
+                clock.fastForward(150);
+                rttEstimator.addSample(clock.instant(), sent, 0);
+                if (controller.remainingCwnd() > 2400) {
+                    QuicPacket filler = new MockPacket(600 + round * 10 + i, (int) (controller.remainingCwnd() - 1200), "");
+                    controller.registerInFlight(filler);
+                }
+                controller.registerAcked(List.of(new PacketInfo(sent, p, x -> {})));
+            }
+        }
+        assertThat(controller.getWindowSize()).isGreaterThanOrEqualTo(24 * 1200L);
+
+        // Clean rounds at baseline 20ms RTT should recover cwnd cleanly
+        long cwndBeforeClean = controller.getWindowSize();
+        for (int round = 0; round < 3; round++) {
+            for (int i = 0; i < 5; i++) {
+                QuicPacket p = new MockPacket(800 + round * 10 + i, 1200, "");
+                controller.registerInFlight(p);
+                Instant sent = clock.instant();
+                clock.fastForward(20);
+                rttEstimator.addSample(clock.instant(), sent, 0);
+                if (controller.remainingCwnd() > 2400) {
+                    QuicPacket filler = new MockPacket(900 + round * 10 + i, (int) (controller.remainingCwnd() - 1200), "");
+                    controller.registerInFlight(filler);
+                }
+                controller.registerAcked(List.of(new PacketInfo(sent, p, x -> {})));
+            }
+        }
+        assertThat(controller.getWindowSize()).isGreaterThan(cwndBeforeClean);
+    }
 }

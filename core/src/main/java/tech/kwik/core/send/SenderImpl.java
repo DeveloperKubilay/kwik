@@ -423,13 +423,13 @@ public class SenderImpl implements Sender, CongestionControlEventListener {
         }
 
         if (pacer != null && pacer.isPacedPending()) {
-            if (!sendRequestQueue[EncryptionLevel.App.ordinal()].hasRequests()) {
+            if (!sendRequestQueue[EncryptionLevel.App.ordinal()].hasRequests()
+                    || congestionController.remainingCwnd() <= 0) {
                 pacer.setPacedPending(false);
             }
             else {
                 long pacingDelay = pacer.getDelayMillis(nanoTimeSupplier.getAsLong(), pacingRateBps(), congestionController.getWindowSize());
                 if (pacingDelay == 0L) {
-                    pacer.setPacedPending(false);
                     return 0L;
                 }
                 waitTime = Math.min(waitTime, pacingDelay);
@@ -551,7 +551,7 @@ public class SenderImpl implements Sender, CongestionControlEventListener {
             if (pacingBlocked && assembled.isEmpty()) {
                 pacer.setPacedPending(sendRequestQueue[EncryptionLevel.App.ordinal()].hasRequests());
             }
-            else if (!pacingBlocked) {
+            else if (!pacingBlocked && assembled.isEmpty()) {
                 pacer.setPacedPending(false);
             }
         }

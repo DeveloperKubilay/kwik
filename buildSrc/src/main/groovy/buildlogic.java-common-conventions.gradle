@@ -11,7 +11,7 @@ plugins {
 
 group = 'tech.kwik'
 
-version = '0.12.1-maintenance.2'
+version = '0.12.1-maintenance.3'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11

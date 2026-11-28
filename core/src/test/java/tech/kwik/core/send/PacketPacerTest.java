@@ -72,4 +72,26 @@ class PacketPacerTest {
         assertThat(pacer.canSendData(nowNanos.get(), pacingRateBps, cwnd)).isTrue();
         assertThat(pacer.getBudgetBytes()).isEqualTo(cwnd / 2.0);
     }
+
+    @Test
+    void activeWakeupBurstIsNotClampedWhenSendingMultiplePackets() {
+        AtomicLong nowNanos = new AtomicLong(1_000_000_000L);
+        PacketPacer pacer = new PacketPacer(1200, nowNanos::get);
+        long pacingRateBps = 10_000_000L;
+        long cwnd = 40 * 1200L; // 48,000 B -> active cap = 24,000 B
+
+        for (int i = 0; i < 5; i++) {
+            pacer.onDataPacketSent(1200, nowNanos.get(), pacingRateBps, cwnd);
+        }
+        pacer.setPacedPending(true);
+
+        // 15ms OS timer wakeup refills up to cwnd / 2 = 24,000 B
+        nowNanos.addAndGet(15_000_000L);
+        assertThat(pacer.getDelayMillis(nowNanos.get(), pacingRateBps, cwnd)).isEqualTo(0L);
+
+        // Even if pacedPending was cleared right before sending, sending at the same timestamp must NOT clamp 24,000 -> 4,800
+        pacer.setPacedPending(false);
+        pacer.onDataPacketSent(1200, nowNanos.get(), pacingRateBps, cwnd);
+        assertThat(pacer.getBudgetBytes()).isEqualTo(cwnd / 2.0 - 1200.0);
+    }
 }

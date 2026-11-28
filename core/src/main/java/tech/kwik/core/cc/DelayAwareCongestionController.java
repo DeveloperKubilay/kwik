@@ -37,8 +37,8 @@ public class DelayAwareCongestionController extends AbstractCongestionController
 
     private static final long MAX_DATAGRAM_SIZE = 1200L;
     private static final long MIN_WINDOW = 4L * MAX_DATAGRAM_SIZE;
-    private static final long MIN_DELAY_BACKOFF_WINDOW = 8L * MAX_DATAGRAM_SIZE;
-    private static final long MAX_WINDOW = 1024L * 1024L;
+    private static final long MIN_DELAY_BACKOFF_WINDOW = 24L * MAX_DATAGRAM_SIZE;
+    private static final long MAX_WINDOW = 2L * 1024L * 1024L;
     private static final double SLOW_START_PACING_GAIN = 2.0;
     private static final double AVOIDANCE_PACING_GAIN = 1.25;
     private static final long MIN_PACING_RATE_BPS = 64_000L;
@@ -66,6 +66,7 @@ public class DelayAwareCongestionController extends AbstractCongestionController
     private int prevRoundMinRtt = Integer.MAX_VALUE;
     private Instant lastDelayReductionTime;
     private double recentDeliveryRateBps;
+    private boolean roundWasCwndLimited;
 
     public DelayAwareCongestionController(RttEstimator rttEstimator, Logger logger, CongestionControlEventListener eventListener) {
         this(Clock.systemUTC(), rttEstimator, logger, eventListener);
@@ -86,6 +87,9 @@ public class DelayAwareCongestionController extends AbstractCongestionController
     public synchronized void registerAcked(List<? extends PacketInfo> acknowlegdedPackets) {
         boolean cwndLimited = (bytesInFlight + 3 * MAX_DATAGRAM_SIZE >= congestionWindow)
                 || (isInSlowStart() && bytesInFlight * 2 >= congestionWindow);
+        if (cwndLimited) {
+            roundWasCwndLimited = true;
+        }
 
         Instant now = clock.instant();
         super.registerAcked(acknowlegdedPackets);
@@ -106,7 +110,7 @@ public class DelayAwareCongestionController extends AbstractCongestionController
             int smoothedRtt = Math.max(1, rttEstimator.getSmoothedRtt());
             int baseRtt = Math.max(1, rttEstimator.getWindowedMinRtt());
             int rttVar = rttEstimator.getRttVar();
-            int delayThresholdMs = Math.max(20, Math.min(50, baseRtt / 5 + rttVar));
+            int delayThresholdMs = Math.max(25, Math.min(75, baseRtt / 4 + rttVar));
 
             roundMinRtt = Math.min(roundMinRtt, latestRtt);
             roundSampleCount++;
@@ -118,6 +122,7 @@ public class DelayAwareCongestionController extends AbstractCongestionController
             }
 
             if (isInSlowStart()
+                    && roundWasCwndLimited
                     && congestionWindow >= 16L * MAX_DATAGRAM_SIZE
                     && consecutiveHighDelaySamples >= 10) {
                 double rateForBdp = recentDeliveryRateBps > 0.0
@@ -143,12 +148,13 @@ public class DelayAwareCongestionController extends AbstractCongestionController
                     roundMinRtt = Integer.MAX_VALUE;
                     roundSampleCount = 0;
                     roundBytesAcked = 0L;
+                    roundWasCwndLimited = false;
                 }
                 else if (elapsedMs >= Math.max(baseRtt, 20) && roundSampleCount >= 4) {
                     long effectiveElapsedMs = Math.max(1L, elapsedMs);
                     double roundRateBps = (roundBytesAcked * 1000.0) / effectiveElapsedMs;
                     boolean meaningfulSample = roundBytesAcked >= 4L * MAX_DATAGRAM_SIZE && elapsedMs <= maxValidRoundMs;
-                    if (meaningfulSample) {
+                    if (meaningfulSample && (roundWasCwndLimited || roundRateBps > recentDeliveryRateBps)) {
                         recentDeliveryRateBps = recentDeliveryRateBps <= 0.0
                                 ? roundRateBps
                                 : 0.5 * recentDeliveryRateBps + 0.5 * roundRateBps;
@@ -159,7 +165,7 @@ public class DelayAwareCongestionController extends AbstractCongestionController
                             && prevRoundMinRtt != Integer.MAX_VALUE
                             && roundMinRtt <= prevRoundMinRtt + Math.max(15, delayThresholdMs / 2);
 
-                    if (queueDelayMs > delayThresholdMs && meaningfulSample && !standingRttShift) {
+                    if (queueDelayMs > delayThresholdMs && meaningfulSample && roundWasCwndLimited && !standingRttShift) {
                         cleanRounds = 0;
                         consecutiveDelayRounds++;
                         double rateForBdp = Math.max(roundRateBps, recentDeliveryRateBps);
@@ -171,7 +177,7 @@ public class DelayAwareCongestionController extends AbstractCongestionController
                             log.cc("Delay exit slow-start cwnd -> " + congestionWindow + " (qDelay=" + queueDelayMs + "ms)");
                         }
                         else if (!isInSlowStart()
-                                && congestionWindow > 10L * MAX_DATAGRAM_SIZE
+                                && congestionWindow > MIN_DELAY_BACKOFF_WINDOW
                                 && (lastDelayReductionTime == null
                                         || Duration.between(lastDelayReductionTime, now).toMillis() >= Math.max(smoothedRtt, 25))) {
                             long bdpTarget = Math.max(MIN_DELAY_BACKOFF_WINDOW, computeBdpTarget(rateForBdp, baseRtt, delayThresholdMs));
@@ -208,6 +214,7 @@ public class DelayAwareCongestionController extends AbstractCongestionController
                     roundMinRtt = Integer.MAX_VALUE;
                     roundSampleCount = 0;
                     roundBytesAcked = 0L;
+                    roundWasCwndLimited = false;
                 }
             }
 
@@ -222,7 +229,7 @@ public class DelayAwareCongestionController extends AbstractCongestionController
                             && consecutiveDelayRounds < 4;
                     if (!severeQueue) {
                         long scale = (currentDelay <= delayThresholdMs)
-                                ? (cleanRounds >= 6 ? 4L : (cleanRounds >= 3 ? 2L : 1L))
+                                ? (cleanRounds >= 5 ? 8L : (cleanRounds >= 3 ? 4L : (cleanRounds >= 1 ? 2L : 1L)))
                                 : 1L;
                         long increment = Math.max(1L, (scale * MAX_DATAGRAM_SIZE * ackedAfterRecoveryBytes) / Math.max(congestionWindow, MAX_DATAGRAM_SIZE));
                         congestionWindow = clampWindow(congestionWindow + increment);
@@ -297,8 +304,8 @@ public class DelayAwareCongestionController extends AbstractCongestionController
         if (rateBps <= 0.0) {
             return (congestionWindow * 85L) / 100L;
         }
-        long bdp = (long) (rateBps * (baseRttMs + Math.min(10, delayThresholdMs / 2)) / 1000.0);
-        return clampWindow(bdp + 4L * MAX_DATAGRAM_SIZE);
+        long bdp = (long) (rateBps * (baseRttMs + Math.min(15, delayThresholdMs / 2)) / 1000.0);
+        return clampWindow(bdp + 6L * MAX_DATAGRAM_SIZE);
     }
 
     private static long clampWindow(long value) {

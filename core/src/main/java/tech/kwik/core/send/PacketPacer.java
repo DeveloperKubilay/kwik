@@ -26,6 +26,8 @@ import java.util.function.LongSupplier;
  */
 final class PacketPacer {
 
+    private static final long IDLE_RESET_NANOS = 50_000_000L;
+
     private final int maxPacketSize;
     private final long idleBurstBytes;
     private final LongSupplier nanoTimeSupplier;
@@ -82,9 +84,11 @@ final class PacketPacer {
         lastRefillNanos = nowNanos;
         long rate = Math.max(1L, pacingRateBps);
         double added = (elapsedNanos * (double) rate) / 1_000_000_000.0;
+        double activeCap = Math.max(idleBurstBytes,
+                Math.min(Math.max(currentCwnd / 2.0, idleBurstBytes), 32.0 * maxPacketSize));
         double cap = wasIdle
-                ? idleBurstBytes
-                : Math.max(idleBurstBytes, Math.min(Math.max(currentCwnd / 2.0, idleBurstBytes), 32.0 * maxPacketSize));
+                ? (elapsedNanos >= IDLE_RESET_NANOS ? idleBurstBytes : Math.max(idleBurstBytes, budgetBytes))
+                : activeCap;
         budgetBytes = Math.min(cap, budgetBytes + added);
     }
 }
